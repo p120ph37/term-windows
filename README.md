@@ -171,6 +171,56 @@ def handle_input(self, key):
         self.close()  # Sets self.closed = True
 ```
 
+#### Window Stack Best Practices
+
+- **Single owner:** Keep one controller (or module-level helper) that owns the `window_stack` and runs the main loop. Child windows should only set `self.child = NewWindow(...)`; the controller is responsible for pushing/popping windows.
+- **Input routing:** Always read keyboard input from the top-most window only. After a child is pushed, the parent should no longer receive keys until the child closes:
+
+```python
+window = window_stack[-1]
+key = term.inkey(timeout=0.1)
+if key:
+    window.handle_input(key)
+    if window.closed:
+        window_stack.pop()
+        if window_stack:
+            window_stack[-1].child = None
+    elif window.child:
+        window_stack.append(window.child)
+        window.child = None
+```
+
+- **Redraw semantics:** Let windows request repainting by setting `self.redraw = True`. After each iteration, the controller should check `window_stack[-1].redraw` and call `draw()` if needed so modals and selections stay responsive.
+- **Tick & refresh:** Call `tick()` only on the active window. If background work (like refreshing discovery data) belongs to the root window, have that window set a flag in `handle_input()` and let the controller act on it after the tick.
+- **Resize handling:** When a `SIGWINCH` fires, rebuild the global `Terminal`, update `win.term` for each window, mark them `redraw = True`, and let the next loop iteration repaint with the new dimensions.
+
+Following this pattern prevents the parent window from consuming input while a modal is open and keeps the UI predictable across complex flows.
+
+### WindowController (New!)
+
+To remove most of the boilerplate required to manage the event loop, you can subclass `WindowController`. It owns the `window_stack`, handles SIGWINCH, routes input to the active window, and enforces the best practices above.
+
+```python
+from term_windows import Window, TextWindow, WindowController
+
+class HostWindow(Window):
+    ...
+
+class MyApp(WindowController):
+    def __init__(self):
+        super().__init__(inkey_timeout=0.1)
+        self.push_window(HostWindow(term=self.term))
+
+    def on_tick(self):
+        # Optional hook executed each loop iteration
+        pass
+
+if __name__ == "__main__":
+    MyApp().run()
+```
+
+Inside your window classes, keep using `self.child = TextWindow(...)` or `self.close()`—the controller automatically pushes/pops windows, redraws them when `self.redraw = True`, and propagates resize events.
+
 ### Terminal Resize Handling
 
 Use a signal handler to detect terminal resize events:

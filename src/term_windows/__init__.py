@@ -11,6 +11,7 @@ from .term_windows import (
     OffsetDimensions,
     Window,
     TextWindow,
+    WindowController,
 )
 
 __all__ = [
@@ -19,6 +20,7 @@ __all__ = [
     'OffsetDimensions',
     'Window',
     'TextWindow',
+    'WindowController',
 ]
 
 __version__ = '0.1.0'

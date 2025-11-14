@@ -2,13 +2,16 @@
 Core window classes for terminal-based UIs.
 
 This module provides the base classes for creating terminal windows with borders,
-layout constraints, and input handling.
+layout constraints, input handling, and a reusable controller for window stacks.
 """
 
+import signal
 import textwrap
-from blessed import Terminal
+import time
 from dataclasses import dataclass
-from typing import Optional, Union
+from typing import List, Optional, Union
+
+from blessed import Terminal
 
 
 @dataclass
@@ -172,6 +175,7 @@ class Window:
         self.scroll_pos = None
         self.closed = False
         self.child = None
+        self.controller = None
         
         if term is None:
             term = Terminal()
@@ -384,4 +388,121 @@ class TextWindow(Window):
             min(max_win_height, len(self._lines) - self.content.offsets.height)
         )
         self.redraw = True
+
+
+class WindowController:
+    """Abstract helper that manages a window stack and event loop.
+
+    Subclasses are responsible for pushing their initial windows (typically in
+    ``__init__``) using :meth:`push_window`. The controller handles keyboard routing,
+    redraws, terminal resize, and window lifecycle management.
+    """
+
+    def __init__(
+        self,
+        *,
+        term: Optional[Terminal] = None,
+        inkey_timeout: float = 0.1,
+        idle_sleep: float = 0.01,
+        register_resize_handler: bool = True,
+    ):
+        self.term = term or Terminal()
+        self.inkey_timeout = inkey_timeout
+        self.idle_sleep = idle_sleep
+        self.window_stack: List[Window] = []
+        self._resize_pending = False
+        if register_resize_handler:
+            signal.signal(signal.SIGWINCH, self._handle_sigwinch)
+
+    def _handle_sigwinch(self, signum, frame):
+        """Refresh Terminal on resize and trigger a redraw."""
+        self.term = Terminal()
+        self._resize_pending = True
+
+    def push_window(self, window: Window):
+        """Push a window onto the stack."""
+        window.term = self.term
+        window.redraw = True
+        window.controller = self
+        self.window_stack.append(window)
+
+    def pop_window(self):
+        """Pop the top window off the stack."""
+        if self.window_stack:
+            popped = self.window_stack.pop()
+            popped.controller = None
+            if self.window_stack:
+                parent = self.window_stack[-1]
+                parent.child = None
+                parent.redraw = True
+            return popped
+        return None
+
+    def current_window(self) -> Optional[Window]:
+        """Return the top-most window, if any."""
+        return self.window_stack[-1] if self.window_stack else None
+
+    def on_tick(self):
+        """Optional hook executed once per loop iteration after window ticks."""
+
+    def run(self):
+        """Enter the main event loop."""
+        if not self.window_stack:
+            raise RuntimeError(
+                "WindowController.run() called with no windows. "
+                "Call push_window() before run()."
+            )
+
+        with self.term.fullscreen(), self.term.cbreak(), self.term.hidden_cursor():
+            self._redraw_top(force=True)
+
+            while self.window_stack:
+                if self._resize_pending:
+                    self._process_resize()
+
+                window = self.current_window()
+                key = self.term.inkey(timeout=self.inkey_timeout)
+
+                if key and window:
+                    self._handle_key(window, key)
+                    if not self.window_stack:
+                        break
+
+                self._redraw_top()
+
+                if self.window_stack:
+                    self.window_stack[-1].tick()
+                    self.on_tick()
+
+                time.sleep(self.idle_sleep)
+
+    def _handle_key(self, window: Window, key):
+        """Dispatch keyboard input to the active window."""
+        window.handle_input(key)
+
+        if window.closed:
+            self.pop_window()
+            return
+
+        if window.child:
+            self.push_window(window.child)
+            window.child = None
+
+    def _process_resize(self):
+        """Re-render windows after a terminal resize."""
+        self._resize_pending = False
+        print(self.term.clear(), end="")
+        for win in self.window_stack:
+            win.term = self.term
+            win.redraw = True
+        self._redraw_top(force=True)
+
+    def _redraw_top(self, force: bool = False):
+        """Redraw the top-most window if it requested it."""
+        top = self.current_window()
+        if not top:
+            return
+        if force or getattr(top, "redraw", False):
+            top.redraw = False
+            top.draw()
 
