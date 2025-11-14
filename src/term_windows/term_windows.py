@@ -176,6 +176,8 @@ class Window:
         if term is None:
             term = Terminal()
         
+        # Use property setter to trigger handle_resize()
+        self._term = None  # Initialize first
         self.position = ConstrainedDimensions(
             Dimensions(x, y, width, height), 
             Dimensions(0, 0, term.width, term.height)
@@ -184,7 +186,7 @@ class Window:
             self.position, 
             Dimensions(1, 1, -2, -2) if self.border else Dimensions(0, 0, 0, 0)
         )
-        self._term = term
+        self.term = term  # Use setter to trigger handle_resize()
         self.redraw = True
 
     @property

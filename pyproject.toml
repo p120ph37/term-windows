@@ -1,5 +1,5 @@
 [build-system]
-requires = ["uv-build>=0.7.19,<0.8.0"]
+requires = ["uv-build>=0.7.19,<0.10.0"]
 build-backend = "uv_build"
 
 [project]
@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [
-    {name = "Your Name", email = "your.email@example.com"},
+    {name = "Aaron Meriwether"},
 ]
 keywords = ["terminal", "tui", "blessed", "windows", "ui", "curses"]
 classifiers = [
@@ -45,6 +45,11 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
+
+[tool.uv.workspace]
+members = [
+    "q",
+]
 
 [dependency-groups]
 dev = [
